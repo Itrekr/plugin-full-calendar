@@ -188,6 +188,7 @@ export interface FullCalendarSettings {
   currentVersion: string | null;
   linkedNotesDirectory: string;
   linkedNoteTemplate: string;
+  caldavTaskInboxLastCalendarId: string;
 }
 
 export const DEFAULT_SETTINGS: FullCalendarSettings = {
@@ -268,6 +269,7 @@ export const DEFAULT_SETTINGS: FullCalendarSettings = {
   defaultReminderMinutes: 10,
   currentVersion: null,
   linkedNotesDirectory: '',
+  caldavTaskInboxLastCalendarId: '',
   linkedNoteTemplate:
     '# {{title}}\n\n**Date**: {{date}}\n**Time**: {{timeString}}\n**Location**: {{location}}\n**Calendar**: {{calendarName}}\n\n## Description\n{{description}}\n\n## Notes\n- '
 };

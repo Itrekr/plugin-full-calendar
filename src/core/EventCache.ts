@@ -319,8 +319,8 @@ export default class EventCache {
     return this.mutationHandler.moveEventToCalendar(eventId, newCalendarId, newEventData);
   }
 
-  scheduleTask(taskId: string, date: Date): Promise<void> {
-    return this.mutationHandler.scheduleTask(taskId, date);
+  scheduleTask(taskId: string, date: Date, allDay = true): Promise<void> {
+    return this.mutationHandler.scheduleTask(taskId, date, allDay);
   }
 
   validateTaskSchedule(taskId: string, date: Date): Promise<{ isValid: boolean; reason?: string }> {

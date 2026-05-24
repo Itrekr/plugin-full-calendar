@@ -467,7 +467,32 @@ export class CacheMutationHandler {
     this.ctx.flushUpdateQueue([], [], calendarId ? [calendarId] : []);
   }
 
-  public async scheduleTask(taskId: string, date: Date): Promise<void> {
+  public async scheduleTask(taskId: string, date: Date, allDay = true): Promise<void> {
+    const caldavTask = this.parseCalDAVTaskId(taskId);
+    if (caldavTask) {
+      const caldavProvider = PluginState.getProviderRegistry().getInstance(
+        caldavTask.calendarId
+      ) as
+        | {
+            scheduleTask?: (taskUid: string, date: Date, allDay?: boolean) => Promise<void>;
+            type: string;
+          }
+        | undefined;
+
+      if (!caldavProvider || caldavProvider.type !== 'caldav') {
+        throw new Error('CalDAV provider not found. Cannot schedule task.');
+      }
+
+      if (typeof caldavProvider.scheduleTask !== 'function') {
+        throw new Error('CalDAV provider does not support task scheduling.');
+      }
+
+      await caldavProvider.scheduleTask(caldavTask.uid, date, allDay);
+      PluginState.getProviderRegistry().reloadProviderNow(caldavTask.calendarId);
+      PluginState.getProviderRegistry().refreshCalDAVTaskInboxViews();
+      return;
+    }
+
     const tasksProvider = PluginState.getProviderRegistry()
       .getActiveProviders()
       .find(provider => provider.type === 'tasks') as unknown as {
@@ -490,6 +515,35 @@ export class CacheMutationHandler {
     taskId: string,
     date: Date
   ): Promise<{ isValid: boolean; reason?: string }> {
+    const caldavTask = this.parseCalDAVTaskId(taskId);
+    if (caldavTask) {
+      const provider = PluginState.getProviderRegistry().getInstance(caldavTask.calendarId) as
+        | {
+            canBeScheduledAt?: (
+              event: OFCEvent,
+              date: Date
+            ) => Promise<{ isValid: boolean; reason?: string }>;
+          }
+        | undefined;
+
+      if (provider && typeof provider.canBeScheduledAt === 'function') {
+        return provider.canBeScheduledAt(
+          {
+            uid: caldavTask.uid,
+            title: '',
+            type: 'single',
+            allDay: true,
+            date: '',
+            endDate: null,
+            completed: false
+          },
+          date
+        );
+      }
+
+      return Promise.resolve({ isValid: true });
+    }
+
     const tasksProvider = PluginState.getProviderRegistry()
       .getActiveProviders()
       .find(provider => provider.type === 'tasks');
@@ -514,5 +568,21 @@ export class CacheMutationHandler {
     }
 
     return Promise.resolve({ isValid: true });
+  }
+
+  private parseCalDAVTaskId(taskId: string): { calendarId: string; uid: string } | null {
+    const parts = taskId.split('::');
+    if (parts.length !== 3 || parts[0] !== 'caldav') {
+      return null;
+    }
+
+    try {
+      return {
+        calendarId: decodeURIComponent(parts[1]),
+        uid: decodeURIComponent(parts[2])
+      };
+    } catch {
+      return null;
+    }
   }
 }

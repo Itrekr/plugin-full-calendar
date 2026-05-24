@@ -304,7 +304,7 @@ export class CalendarView extends ItemView implements ViewContext {
           }
           this.dateNavigation?.showViewContextMenu(mouseEvent, calendar);
         },
-        drop: (taskId, date) => this.interactionHandler.handleDrop(taskId, date)
+        drop: (taskId, date, allDay) => this.interactionHandler.handleDrop(taskId, date, allDay)
       });
 
       // Initialize shadow events if starting in timeline view

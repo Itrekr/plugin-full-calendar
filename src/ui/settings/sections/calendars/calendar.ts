@@ -55,7 +55,7 @@ interface ExtraRenderProps {
   resources?: { id: string; title: string; eventColor?: string }[];
   onViewChange?: () => void; // Add view change callback
   businessHours?: boolean | object; // Support for business hours
-  drop?: (taskId: string, date: Date) => Promise<void>; // Drag-and-drop from backlog
+  drop?: (taskId: string, date: Date, allDay: boolean) => Promise<void>; // Drag-and-drop from backlog
   timeZone?: string;
 
   // New granular view configuration properties
@@ -729,7 +729,7 @@ export async function renderCalendar(
         // Get the task ID from the dragged element's data transfer
         const taskId = info.draggedEl.getAttribute('data-task-id');
         if (taskId) {
-          void drop(taskId, info.date);
+          void drop(taskId, info.date, info.allDay);
         }
       }),
 

@@ -199,9 +199,9 @@ function createAuthorizedApi(tokenRecord: ApiTokenRecord): AuthorizedAPI {
       assertScope(grantedScopes, 'events:write');
       return cache.modifyRecurringInstance(eventId, instanceDate, newEvent);
     },
-    scheduleTask: (taskId: string, date: Date) => {
+    scheduleTask: (taskId: string, date: Date, allDay = true) => {
       assertScope(grantedScopes, 'events:write');
-      return cache.scheduleTask(taskId, date);
+      return cache.scheduleTask(taskId, date, allDay);
     },
     validateTaskSchedule: (taskId: string, date: Date) => {
       assertScope(grantedScopes, 'events:write');
@@ -288,7 +288,7 @@ export interface AuthorizedAPI {
   ): Promise<boolean>;
   toggleRecurringInstance(eventId: string, instanceDate: string, isDone: boolean): Promise<void>;
   modifyRecurringInstance(eventId: string, instanceDate: string, newEvent: OFCEvent): Promise<void>;
-  scheduleTask(taskId: string, date: Date): Promise<void>;
+  scheduleTask(taskId: string, date: Date, allDay?: boolean): Promise<void>;
   validateTaskSchedule(taskId: string, date: Date): Promise<{ isValid: boolean; reason?: string }>;
   getCalendarSources(): CalendarInfo[];
   getProviderCapabilities(calendarId: string): ReturnType<ProviderRegistry['getCapabilities']>;

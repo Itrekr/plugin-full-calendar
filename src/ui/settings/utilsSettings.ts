@@ -95,6 +95,8 @@ export function migrateAndSanitizeSettings(settings: unknown): {
     authorizedTokens: (raw as Partial<FullCalendarSettings>).authorizedTokens || {},
     currentVersion: raw.currentVersion ?? null,
     linkedNotesDirectory: raw.linkedNotesDirectory ?? DEFAULT_SETTINGS.linkedNotesDirectory,
+    caldavTaskInboxLastCalendarId:
+      raw.caldavTaskInboxLastCalendarId ?? DEFAULT_SETTINGS.caldavTaskInboxLastCalendarId,
     linkedNoteTemplate: raw.linkedNoteTemplate ?? DEFAULT_SETTINGS.linkedNoteTemplate
   } as FullCalendarSettings & { calendarSources: (CalendarInfo | GoogleSourceWithAuth)[] } & {
     googleAuth?: LegacyGoogleAuth;

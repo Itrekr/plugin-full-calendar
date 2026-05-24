@@ -13,6 +13,8 @@ import { createBasicAuthHeader } from './auth_caldav';
 import { LinkedNoteIndex } from '../utils/LinkedNoteIndex';
 import { TFile } from 'obsidian';
 import { createLinkedNoteForProvider } from '../../features/linked-notes/linkedNotes';
+import { parseTimezoneAwareString } from '../../features/timezone/Timezone';
+import { PluginState } from '../../core/PluginState';
 
 import { fetchCalendarInfo } from './helper_caldav';
 
@@ -66,6 +68,29 @@ function parseStatusCode(statusLine: string): number | null {
 
 type CalendarObjectRef = {
   href: string;
+  etag?: string;
+};
+
+type CalendarObjectData = CalendarObjectRef & {
+  ics: string;
+};
+
+export type CalDAVTaskCalendarInfo = {
+  id: string;
+  name: string;
+};
+
+export type CalDAVTaskInboxItem = {
+  id: string;
+  uid: string;
+  title: string;
+  calendarId: string;
+  calendarName: string;
+  description: string;
+  location: string;
+  url: string;
+  status: string;
+  completed: boolean;
   etag?: string;
 };
 
@@ -124,11 +149,180 @@ function resolveCollectionObjectUrl(collectionUrl: string, href: string): string
   return new URL(href, collectionUrl).toString();
 }
 
+function getTextProperty(component: ical.Component, property: string): string {
+  return String(component.getFirstPropertyValue(property) || '');
+}
+
+function getTaskUid(todo: ical.Component): string {
+  return getTextProperty(todo, 'uid').trim();
+}
+
+function hasValidTaskDate(todo: ical.Component, property: 'dtstart' | 'due'): boolean {
+  const prop = todo.getFirstProperty(property);
+  if (!prop) return false;
+
+  try {
+    const value: ical.Time = prop.getFirstValue();
+    return parseTimezoneAwareString(value).isValid;
+  } catch {
+    return false;
+  }
+}
+
+function isUnscheduledTodo(todo: ical.Component): boolean {
+  return !hasValidTaskDate(todo, 'dtstart') && !hasValidTaskDate(todo, 'due');
+}
+
+function isCompletedTodo(todo: ical.Component): boolean {
+  return (
+    getTextProperty(todo, 'status').toUpperCase() === 'COMPLETED' ||
+    Boolean(todo.getFirstProperty('completed'))
+  );
+}
+
+function parseVCalendar(ics: string): ical.Component {
+  return new ical.Component(ical.parse(ics));
+}
+
+function createRandomUid(): string {
+  if (typeof window !== 'undefined' && window.crypto?.randomUUID) {
+    return window.crypto.randomUUID();
+  }
+
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function createUnscheduledTaskIcs(uid: string, title: string): string {
+  const vcalendar = new ical.Component(['vcalendar', [], []]);
+  vcalendar.addPropertyWithValue('version', '2.0');
+  vcalendar.addPropertyWithValue('prodid', '-//Obsidian Full Calendar Plugin//NONSGML v1.0//EN');
+
+  const todo = new ical.Component('vtodo');
+  todo.addPropertyWithValue('uid', uid);
+  todo.addPropertyWithValue('summary', title);
+  todo.addPropertyWithValue('dtstamp', ical.Time.now());
+  todo.addPropertyWithValue('status', 'NEEDS-ACTION');
+  vcalendar.addSubcomponent(todo);
+
+  return (vcalendar as unknown as { toString(): string }).toString();
+}
+
+function findTodoByUid(vcalendar: ical.Component, uid: string): ical.Component | null {
+  const normalizedUid = uid.trim();
+  return (
+    vcalendar.getAllSubcomponents('vtodo').find(todo => getTaskUid(todo) === normalizedUid) ?? null
+  );
+}
+
+function parseUnscheduledTasksFromObject(
+  object: CalendarObjectData,
+  calendarId: string,
+  calendarName: string
+): CalDAVTaskInboxItem[] {
+  let vcalendar: ical.Component;
+  try {
+    vcalendar = parseVCalendar(object.ics);
+  } catch {
+    return [];
+  }
+
+  const tasks: CalDAVTaskInboxItem[] = [];
+
+  for (const todo of vcalendar.getAllSubcomponents('vtodo')) {
+    if (!isUnscheduledTodo(todo)) {
+      continue;
+    }
+
+    const uid = getTaskUid(todo);
+    if (!uid) {
+      continue;
+    }
+
+    tasks.push({
+      id: uid,
+      uid,
+      title: getTextProperty(todo, 'summary') || 'Untitled task',
+      calendarId,
+      calendarName,
+      description: getTextProperty(todo, 'description'),
+      location: getTextProperty(todo, 'location'),
+      url: getTextProperty(todo, 'url'),
+      status: getTextProperty(todo, 'status'),
+      completed: isCompletedTodo(todo),
+      etag: object.etag
+    });
+  }
+
+  return tasks;
+}
+
+function allDayIcalTimeFromDate(date: Date): ical.Time {
+  return new ical.Time({
+    year: date.getFullYear(),
+    month: date.getMonth() + 1,
+    day: date.getDate(),
+    isDate: true
+  });
+}
+
+function timedIcalTimeFromDate(date: Date): ical.Time {
+  return new ical.Time({
+    year: date.getFullYear(),
+    month: date.getMonth() + 1,
+    day: date.getDate(),
+    hour: date.getHours(),
+    minute: date.getMinutes(),
+    second: date.getSeconds(),
+    isDate: false
+  });
+}
+
+function replaceAllDayTaskDate(
+  todo: ical.Component,
+  property: 'dtstart' | 'due',
+  date: Date
+): void {
+  todo.removeAllProperties(property);
+  const prop = new ical.Property(property);
+  prop.setValue(allDayIcalTimeFromDate(date));
+  todo.addProperty(prop);
+}
+
+function replaceTimedTaskDate(
+  todo: ical.Component,
+  property: 'dtstart' | 'due',
+  date: Date,
+  timezone: string
+): void {
+  todo.removeAllProperties(property);
+  const prop = new ical.Property(property);
+  if (timezone && timezone !== 'UTC' && timezone !== 'Z') {
+    prop.setParameter('TZID', timezone);
+  }
+  prop.setValue(timedIcalTimeFromDate(date));
+  todo.addProperty(prop);
+}
+
+function taskToLinkedNoteEvent(task: CalDAVTaskInboxItem): OFCEvent {
+  return {
+    type: 'single',
+    uid: task.uid,
+    title: task.title,
+    date: '',
+    endDate: null,
+    allDay: true,
+    completed: task.completed ? new Date().toISOString() : false,
+    description: task.description,
+    location: task.location,
+    url: task.url
+  };
+}
+
 async function fetchCalendarObjectsByRefs(
   collectionUrl: string,
   refs: CalendarObjectRef[],
   authHeader?: string
-): Promise<{ ics: string; etag?: string }[]> {
+): Promise<CalendarObjectData[]> {
   const getResults = await Promise.allSettled(
     refs.map(async ref => {
       const getHeaders: Record<string, string> = { Accept: 'text/calendar' };
@@ -144,9 +338,10 @@ async function fetchCalendarObjectsByRefs(
         throw new Error(`CalDAV fallback GET failed (${getRes.status}) for ${ref.href}`);
       }
 
-      const payload = {
+      const payload: CalendarObjectData = {
+        href: ref.href,
         ics: assertIcsPayload(getText, `CalDAV fallback GET for ${ref.href}`)
-      } as { ics: string; etag?: string };
+      };
 
       if (ref.etag) {
         payload.etag = ref.etag;
@@ -156,7 +351,7 @@ async function fetchCalendarObjectsByRefs(
     })
   );
 
-  const successfulObjects: { ics: string; etag?: string }[] = [];
+  const successfulObjects: CalendarObjectData[] = [];
   const failedResults: PromiseRejectedResult[] = [];
 
   for (const result of getResults) {
@@ -189,7 +384,7 @@ async function fetchCalendarObjectsByRefs(
 async function fetchCalendarObjectsViaPropfindFallback(
   collectionUrl: string,
   authHeader?: string
-): Promise<{ ics: string; etag?: string }[]> {
+): Promise<CalendarObjectData[]> {
   const propfindHeaders: Record<string, string> = {
     Depth: '1',
     'Content-Type': 'application/xml; charset=utf-8',
@@ -235,7 +430,7 @@ async function fetchCalendarObjectsForComponent(
   componentName: 'VEVENT' | 'VTODO',
   authHeader?: string,
   allowFallback = true
-): Promise<{ icsList: { ics: string; etag?: string }[]; fellBack: boolean }> {
+): Promise<{ icsList: CalendarObjectData[]; fellBack: boolean }> {
   const reportBody = `<?xml version="1.0" encoding="utf-8"?>
 <c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
   <d:prop>
@@ -284,7 +479,7 @@ async function fetchCalendarObjectsForComponent(
 
   // STEP 2: Parse the XML response using DOMParser
   const doc = ensureXmlDocument(xml, 'CalDAV REPORT');
-  const icsList: { ics: string; etag?: string }[] = [];
+  const icsList: CalendarObjectData[] = [];
 
   const responses = doc.getElementsByTagNameNS('*', 'response');
   const allResponses = Array.from(responses);
@@ -325,7 +520,13 @@ async function fetchCalendarObjectsForComponent(
           if (candidates.length > 0) etag = candidates[0].textContent;
         }
 
+        const hrefNode =
+          response.getElementsByTagNameNS('DAV:', 'href')[0] ||
+          response.getElementsByTagNameNS('*', 'href')[0];
+        const href = hrefNode?.textContent?.trim() || '';
+
         icsList.push({
+          href,
           ics: assertIcsPayload(calendarText, 'CalDAV REPORT'),
           etag: etag || undefined
         });
@@ -373,7 +574,7 @@ async function fetchCalendarObjects(
   end: Date,
   username?: string,
   password?: string
-): Promise<{ ics: string; etag?: string }[]> {
+): Promise<CalendarObjectData[]> {
   const authHeader = createBasicAuthHeader(username, password);
 
   // 1. Fetch VEVENT components (allow fallback)
@@ -394,7 +595,7 @@ async function fetchCalendarObjects(
 
   // 2. Fetch VTODO components, catching errors gracefully to maintain calendar-only compatibility.
   // We disable fallback here because if VEVENT didn't need it, VTODO doesn't need it.
-  let vtodoList: { ics: string; etag?: string }[] = [];
+  let vtodoList: CalendarObjectData[] = [];
   try {
     const res = await fetchCalendarObjectsForComponent(
       collectionUrl,
@@ -415,7 +616,7 @@ async function fetchCalendarObjects(
   // 3. Combine and deduplicate by 'ics' content payload
   const combined = [...veventList, ...vtodoList];
   const seenIcs = new Set<string>();
-  const deduplicated: { ics: string; etag?: string }[] = [];
+  const deduplicated: CalendarObjectData[] = [];
 
   for (const item of combined) {
     const trimmed = item.ics.trim();
@@ -492,6 +693,9 @@ export class CalDAVProvider implements CalendarProvider<CalDAVProviderConfig>, S
   private plugin: FullCalendarPlugin;
   private source: CalDAVProviderConfig;
   public readonly linkedNoteIndex: LinkedNoteIndex;
+  private undatedTaskCache: CalDAVTaskInboxItem[] = [];
+  private undatedTaskLoadPromise: Promise<CalDAVTaskInboxItem[]> | null = null;
+  private hasLoadedUndatedTasks = false;
 
   readonly type = 'caldav';
   readonly displayName = 'CalDAV';
@@ -520,6 +724,17 @@ export class CalDAVProvider implements CalendarProvider<CalDAVProviderConfig>, S
       calendarName: this.source.name,
       linkedNoteIndex: this.linkedNoteIndex
     });
+  }
+
+  async createLinkedNoteForTask(task: CalDAVTaskInboxItem): Promise<TFile | null> {
+    return this.createLinkedNote(taskToLinkedNoteEvent(task));
+  }
+
+  getTaskInboxCalendarInfo(): CalDAVTaskCalendarInfo {
+    return {
+      id: this.source.id,
+      name: this.source.name
+    };
   }
 
   getCapabilities(): CalendarProviderCapabilities {
@@ -605,10 +820,98 @@ export class CalDAVProvider implements CalendarProvider<CalDAVProviderConfig>, S
     }
   }
 
+  private async loadUndatedTasksFromRemote(): Promise<CalDAVTaskInboxItem[]> {
+    const { isCalendar: isValid } = await fetchCalendarInfo(this.source.homeUrl, {
+      username: this.source.username,
+      password: this.source.password
+    });
+
+    if (!isValid) {
+      throw new Error(
+        `[CalDAVProvider] Invalid collection URL or not a calendar: ${this.source.homeUrl}`
+      );
+    }
+
+    const authHeader = createBasicAuthHeader(this.source.username, this.source.password);
+    const objects = await fetchCalendarObjectsViaPropfindFallback(this.source.homeUrl, authHeader);
+    return objects.flatMap(object =>
+      parseUnscheduledTasksFromObject(object, this.source.id, this.source.name)
+    );
+  }
+
+  async refreshUndatedTasks(): Promise<CalDAVTaskInboxItem[]> {
+    if (this.undatedTaskLoadPromise) {
+      return this.undatedTaskLoadPromise;
+    }
+
+    this.undatedTaskLoadPromise = this.loadUndatedTasksFromRemote()
+      .then(tasks => {
+        this.undatedTaskCache = tasks;
+        this.hasLoadedUndatedTasks = true;
+        return [...this.undatedTaskCache];
+      })
+      .finally(() => {
+        this.undatedTaskLoadPromise = null;
+      });
+
+    return this.undatedTaskLoadPromise;
+  }
+
+  async getUndatedTasks(): Promise<CalDAVTaskInboxItem[]> {
+    if (!this.hasLoadedUndatedTasks && !this.undatedTaskLoadPromise) {
+      void this.refreshUndatedTasks()
+        .then(() => PluginState.getProviderRegistry().refreshCalDAVTaskInboxViews())
+        .catch(err => console.warn('[CalDAVProvider] Failed to refresh task inbox.', err));
+    }
+
+    return Promise.resolve([...this.undatedTaskCache]);
+  }
+
+  async createTask(title: string): Promise<CalDAVTaskInboxItem> {
+    const trimmedTitle = title.trim();
+    if (!trimmedTitle) {
+      throw new Error('CalDAV task title cannot be empty.');
+    }
+
+    const uid = createRandomUid();
+    const icsContent = createUnscheduledTaskIcs(uid, trimmedTitle);
+    const url = `${canonCollection(this.source.homeUrl)}${uid}.ics`;
+
+    await this.doRequest(url, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'text/calendar; charset=utf-8',
+        'If-None-Match': '*'
+      },
+      body: icsContent
+    });
+
+    const task: CalDAVTaskInboxItem = {
+      id: uid,
+      uid,
+      title: trimmedTitle,
+      calendarId: this.source.id,
+      calendarName: this.source.name,
+      description: '',
+      location: '',
+      url: '',
+      status: 'NEEDS-ACTION',
+      completed: false
+    };
+
+    this.undatedTaskCache = [
+      task,
+      ...this.undatedTaskCache.filter(existingTask => existingTask.uid !== uid)
+    ];
+    this.hasLoadedUndatedTasks = true;
+
+    return task;
+  }
+
   async createEvent(event: OFCEvent): Promise<[OFCEvent, EventLocation | null]> {
     // 1. Ensure event has a UID
     if (!event.uid) {
-      event.uid = window.crypto.randomUUID();
+      event.uid = createRandomUid();
     }
     const uid = event.uid;
 
@@ -669,6 +972,51 @@ export class CalDAVProvider implements CalendarProvider<CalDAVProviderConfig>, S
     await this.doRequest(url, {
       method: 'DELETE'
     });
+  }
+
+  async scheduleTask(taskUid: string, date: Date, allDay = true): Promise<void> {
+    const authHeader = createBasicAuthHeader(this.source.username, this.source.password);
+    const objects = await fetchCalendarObjectsViaPropfindFallback(this.source.homeUrl, authHeader);
+
+    for (const object of objects) {
+      const vcalendar = parseVCalendar(object.ics);
+      const todo = findTodoByUid(vcalendar, taskUid);
+      if (!todo || !isUnscheduledTodo(todo)) {
+        continue;
+      }
+
+      if (allDay) {
+        replaceAllDayTaskDate(todo, 'due', date);
+      } else {
+        const displayTimezone =
+          PluginState.getSettings().displayTimezone ||
+          Intl.DateTimeFormat().resolvedOptions().timeZone;
+        replaceTimedTaskDate(todo, 'dtstart', date, displayTimezone);
+        replaceTimedTaskDate(
+          todo,
+          'due',
+          new Date(date.getTime() + 60 * 60 * 1000),
+          displayTimezone
+        );
+      }
+      todo.updatePropertyWithValue('last-modified', ical.Time.now());
+
+      const url = resolveCollectionObjectUrl(this.source.homeUrl, object.href);
+      await this.doRequest(url, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'text/calendar; charset=utf-8',
+          ...(object.etag ? { 'If-Match': object.etag } : {})
+        },
+        body: (vcalendar as unknown as { toString(): string }).toString()
+      });
+
+      this.undatedTaskCache = this.undatedTaskCache.filter(task => task.uid !== taskUid);
+      this.hasLoadedUndatedTasks = true;
+      return;
+    }
+
+    throw new Error(`CalDAV task ${taskUid} was not found or is already scheduled.`);
   }
 
   async createInstanceOverride(

@@ -13,6 +13,7 @@ import EventCache from '../core/EventCache';
 import FullCalendarPlugin from '../main';
 import { ObsidianIO, ObsidianInterface } from '../ObsidianAdapter';
 import { TasksBacklogManager } from './tasks/TasksBacklogManager';
+import { CalDAVTaskInboxManager } from './caldav/CalDAVTaskInboxManager';
 import { t } from '../features/i18n/i18n';
 
 const SECOND = 1000;
@@ -41,6 +42,12 @@ export class ProviderRegistry {
       this.tasksBacklogManager.refreshViews();
     }
   }
+
+  public refreshCalDAVTaskInboxViews(): void {
+    if (this.caldavTaskInboxManager.getIsLoaded()) {
+      this.caldavTaskInboxManager.refreshViews();
+    }
+  }
   private providers = new Map<string, ProviderLoader>();
   private instances = new Map<string, CalendarProvider<unknown>>();
   private sources: CalendarInfo[] = [];
@@ -57,6 +64,7 @@ export class ProviderRegistry {
 
   // Tasks backlog manager for lifecycle management
   private tasksBacklogManager: TasksBacklogManager;
+  private caldavTaskInboxManager: CalDAVTaskInboxManager;
 
   private normalizePersistentId(id: string): string {
     return id.replace(/\\/g, '/');
@@ -117,6 +125,7 @@ export class ProviderRegistry {
   constructor(plugin: FullCalendarPlugin) {
     this.plugin = plugin;
     this.tasksBacklogManager = new TasksBacklogManager(plugin);
+    this.caldavTaskInboxManager = new CalDAVTaskInboxManager(plugin);
     // initializeInstances is now called from main.ts after settings are loaded.
   }
 
@@ -547,6 +556,7 @@ export class ProviderRegistry {
           // Immediately kick off Stage 2 for THIS provider instead of waiting for all Stage 1.
           const rawEventsStage2 = await instance.getEvents();
           processResults(settingsId, rawEventsStage2);
+          await this.refreshProviderAuxiliaryData(settingsId, instance);
         } catch (e) {
           const source = this.getSource(settingsId);
           console.warn(`Full Calendar: Failed to load remote calendar source pipeline`, source, e);
@@ -561,6 +571,27 @@ export class ProviderRegistry {
 
   private getRetryPolicy(instance: CalendarProvider<unknown>): ProviderLoadRetryPolicy | null {
     return instance.getLoadRetryPolicy?.() ?? null;
+  }
+
+  private async refreshProviderAuxiliaryData(
+    settingsId: string,
+    instance: CalendarProvider<unknown>
+  ): Promise<void> {
+    const auxiliaryProvider = instance as unknown as {
+      refreshUndatedTasks?: () => Promise<unknown>;
+    };
+
+    if (typeof auxiliaryProvider.refreshUndatedTasks !== 'function') {
+      return;
+    }
+
+    try {
+      await auxiliaryProvider.refreshUndatedTasks();
+      this.refreshCalDAVTaskInboxViews();
+    } catch (e) {
+      const source = this.getSource(settingsId);
+      console.warn('Full Calendar: Failed to refresh provider auxiliary data', source, e);
+    }
   }
 
   private scheduleProviderReload(
@@ -605,8 +636,10 @@ export class ProviderRegistry {
     try {
       const rawEvents = await instance.getEvents();
       this.cache.syncCalendar(settingsId, rawEvents);
+      await this.refreshProviderAuxiliaryData(settingsId, instance);
       this.providerRetryAttempts.delete(settingsId);
       this.refreshBacklogViews();
+      this.refreshCalDAVTaskInboxViews();
     } catch (e) {
       const source = this.getSource(settingsId);
       console.warn(`Full Calendar: Delayed provider reload failed`, source, e);
@@ -762,20 +795,19 @@ export class ProviderRegistry {
     showNotice(t('notices.revalidatingRemotes'));
 
     const promises = remoteInstances.map(([settingsId, instance]) => {
-      return instance
-        .getEvents()
-        .then(events => {
+      return Promise.all([
+        instance.getEvents().then(events => {
           if (!this.cache) {
             return;
           }
           this.cache.syncCalendar(settingsId, events);
-        })
-        .catch((err: Error) => {
-          const source = this.getSource(settingsId);
-          const name =
-            source && 'name' in source ? (source as { name: string }).name : instance.type;
-          throw new Error(`Failed to revalidate calendar "${name}": ${err.message}`);
-        });
+        }),
+        this.refreshProviderAuxiliaryData(settingsId, instance)
+      ]).catch((err: Error) => {
+        const source = this.getSource(settingsId);
+        const name = source && 'name' in source ? (source as { name: string }).name : instance.type;
+        throw new Error(`Failed to revalidate calendar "${name}": ${err.message}`);
+      });
     });
 
     void Promise.allSettled(promises).then(results => {
@@ -841,6 +873,9 @@ export class ProviderRegistry {
       if (this.tasksBacklogManager.getIsLoaded()) {
         this.tasksBacklogManager.refreshViews();
       }
+      if (this.caldavTaskInboxManager.getIsLoaded()) {
+        this.caldavTaskInboxManager.refreshViews();
+      }
     })();
   };
 
@@ -859,6 +894,14 @@ export class ProviderRegistry {
       if (this.tasksBacklogManager.getIsLoaded()) {
         this.tasksBacklogManager.onunload();
       }
+    }
+
+    if (this.hasProviderOfType('caldav')) {
+      if (!this.caldavTaskInboxManager.getIsLoaded()) {
+        this.caldavTaskInboxManager.onload();
+      }
+    } else if (this.caldavTaskInboxManager.getIsLoaded()) {
+      this.caldavTaskInboxManager.onunload();
     }
   }
 
