@@ -673,7 +673,7 @@ export class TasksPluginProvider
 
   public async getUndatedTasks(): Promise<ParsedUndatedTask[]> {
     await this._ensureTasksCacheIsWarm();
-    let tasks = this.allTasks.filter(t => !this.hasBacklogTargetDate(t) && !t.isDone);
+    let tasks = this.allTasks.filter(t => !this.hasSchedulingDate(t) && !t.isDone);
 
     const settings = PluginState.getSettings();
     const backlogQuery = settings.tasksIntegration.backlogQuery?.trim();
@@ -840,11 +840,8 @@ export class TasksPluginProvider
     }
   }
 
-  private hasBacklogTargetDate(task: CalendarTask): boolean {
-    return !!this.getTaskDateValue(
-      task,
-      PluginState.getSettings().tasksIntegration.backlogDateTarget
-    );
+  private hasSchedulingDate(task: CalendarTask): boolean {
+    return !!(task.scheduledDate || task.startDate || task.dueDate);
   }
 
   private updateTaskLine(

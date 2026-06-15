@@ -426,7 +426,7 @@ describe('TasksPluginProvider', () => {
       ]);
     });
 
-    it('filters backlog tasks by the configured Tasks date field', async () => {
+    it('excludes tasks with any scheduling date from the backlog', async () => {
       mockPlugin.settings.tasksIntegration = {
         backlogDateTarget: 'dueDate',
         calendarDisplayDateTarget: 'scheduledDate',
@@ -442,7 +442,6 @@ describe('TasksPluginProvider', () => {
                   path: 'Daily.md',
                   description: 'Scheduled only',
                   taskLocation: { lineNumber: 0 },
-                  scheduledDate: { toDate: () => new Date('2026-05-02T00:00:00') },
                   originalMarkdown: '- [ ] Scheduled only ⏳ 2026-05-02',
                   isDone: false
                 },
@@ -450,8 +449,21 @@ describe('TasksPluginProvider', () => {
                   path: 'Daily.md',
                   description: 'Has due date',
                   taskLocation: { lineNumber: 1 },
-                  dueDate: { toDate: () => new Date('2026-05-03T00:00:00') },
                   originalMarkdown: '- [ ] Has due date 📅 2026-05-03',
+                  isDone: false
+                },
+                {
+                  path: 'Daily.md',
+                  description: 'Has start date',
+                  taskLocation: { lineNumber: 2 },
+                  originalMarkdown: '- [ ] Has start date 🛫 2026-05-04',
+                  isDone: false
+                },
+                {
+                  path: 'Daily.md',
+                  description: 'Actually undated',
+                  taskLocation: { lineNumber: 3 },
+                  originalMarkdown: '- [ ] Actually undated',
                   isDone: false
                 }
               ]
@@ -461,8 +473,46 @@ describe('TasksPluginProvider', () => {
       );
 
       await expect(provider.getUndatedTasks()).resolves.toEqual([
-        expect.objectContaining({ title: 'Scheduled only' })
+        expect.objectContaining({ title: 'Actually undated' })
       ]);
+    });
+
+    it('keeps a backlog drop excluded when backlog and display date targets differ', async () => {
+      const file = { path: 'Daily.md' };
+      mockApp.getFileByPath.mockReturnValue(file);
+      mockApp.rewrite.mockImplementation((_file: unknown, update: (content: string) => string) => {
+        const updated = update('- [ ] Backlog task');
+        expect(updated).toBe(`- [ ] Backlog task ${String.fromCodePoint(0x23f3)} 2026-05-02`);
+        return Promise.resolve();
+      });
+      mockPlugin.settings.tasksIntegration = {
+        backlogDateTarget: 'dueDate',
+        calendarDisplayDateTarget: 'scheduledDate',
+        openEditModalAfterBacklogDrop: false
+      };
+      mockPlugin.app.workspace.trigger.mockImplementation(
+        (eventName: string, callback: (data: unknown) => void) => {
+          if (eventName === 'obsidian-tasks-plugin:request-cache-update') {
+            callback({
+              state: 'Warm',
+              tasks: [
+                {
+                  path: 'Daily.md',
+                  description: 'Backlog task',
+                  taskLocation: { lineNumber: 0 },
+                  originalMarkdown: '- [ ] Backlog task',
+                  isDone: false
+                }
+              ]
+            });
+          }
+        }
+      );
+
+      await provider.getUndatedTasks();
+      await provider.scheduleTask('Daily.md::0', new Date('2026-05-02T00:00:00'));
+
+      await expect(provider.getUndatedTasks()).resolves.toEqual([]);
     });
 
     it('marks backlog tasks complete through the backlog checkbox action', async () => {

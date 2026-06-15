@@ -44,6 +44,7 @@ export type TasksBacklogDateTarget = TasksDateTarget;
 export type TasksDisplayFormat = 'standard' | 'dayPlanner';
 
 export interface TasksIntegrationSettings {
+  /** @deprecated Backlog eligibility now requires all Tasks date fields to be empty. */
   backlogDateTarget: TasksBacklogDateTarget;
   calendarDisplayDateTarget: TasksDateTarget;
   openEditModalAfterBacklogDrop: boolean;

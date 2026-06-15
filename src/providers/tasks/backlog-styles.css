@@ -25,21 +25,6 @@
   margin-bottom: 6px;
 }
 
-.tasks-backlog-target {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--text-muted);
-  font-size: 0.85em;
-  white-space: nowrap;
-}
-
-.tasks-backlog-target-select {
-  max-width: 150px;
-  min-height: 28px;
-  font-size: 0.95em;
-}
-
 .tasks-backlog-search-row {
   margin-top: 8px;
 }

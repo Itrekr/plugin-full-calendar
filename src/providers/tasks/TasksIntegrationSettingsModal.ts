@@ -2,7 +2,7 @@ import { PluginState } from '../../core/PluginState';
 import { Modal, Setting } from 'obsidian';
 import FullCalendarPlugin from '../../main';
 import { t } from '../../features/i18n/i18n';
-import { TasksBacklogDateTarget, TasksDateTarget, TasksDisplayFormat } from '../../types/settings';
+import { TasksDateTarget, TasksDisplayFormat } from '../../types/settings';
 
 export class TasksIntegrationSettingsModal extends Modal {
   constructor(
@@ -17,23 +17,6 @@ export class TasksIntegrationSettingsModal extends Modal {
     this.titleEl.setText(t('settings.tasksIntegration.modal.title'));
 
     const settings = PluginState.getSettings().tasksIntegration;
-
-    new Setting(this.contentEl)
-      .setName(t('settings.tasksIntegration.backlogDateTarget.label'))
-      .setDesc(t('settings.tasksIntegration.backlogDateTarget.description'))
-      .addDropdown(dropdown => {
-        dropdown
-          .addOption('scheduledDate', t('settings.tasksIntegration.backlogDateTarget.scheduled'))
-          .addOption('startDate', t('settings.tasksIntegration.backlogDateTarget.start'))
-          .addOption('dueDate', t('settings.tasksIntegration.backlogDateTarget.due'))
-          .setValue(settings.backlogDateTarget)
-          .onChange(async value => {
-            settings.backlogDateTarget = value as TasksBacklogDateTarget;
-            await PluginState.saveSettings();
-            PluginState.getProviderRegistry().refreshBacklogViews();
-            this.onChange();
-          });
-      });
 
     new Setting(this.contentEl)
       .setName(t('settings.tasksIntegration.calendarDisplayDateTarget.label'))

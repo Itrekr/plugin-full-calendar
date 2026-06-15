@@ -90,18 +90,15 @@ Full flow and invariants are detailed in [Tasks Integration Architecture](tasks-
 
 #### Tasks date-field integration contract
 
-The Tasks integration has two explicit date-field settings:
+The Tasks integration persists two date-field settings:
 
-- `settings.tasksIntegration.backlogDateTarget` controls which incomplete tasks appear in the Tasks Backlog.
+- `settings.tasksIntegration.backlogDateTarget` is retained only for backward-compatible settings loading.
 - `settings.tasksIntegration.calendarDisplayDateTarget` controls which Tasks date marker is used for calendar display and calendar/backlog write-back.
 
-Backlog filtering must use `backlogDateTarget`, not a hardcoded definition of "undated":
-
-| Target          | Backlog filter                                   |
-| --------------- | ------------------------------------------------ |
-| `scheduledDate` | Include incomplete tasks without `scheduledDate` |
-| `startDate`     | Include incomplete tasks without `startDate`     |
-| `dueDate`       | Include incomplete tasks without `dueDate`       |
+Backlog filtering includes only incomplete tasks without a scheduled, start, or due date. A task
+with any of those fields is scheduled or deadlined and must not appear in the backlog.
+The Tasks payload adapter reads cache date objects first and falls back to the persisted markdown
+date markers so backlog eligibility remains correct after restart and across Tasks cache shapes.
 
 Calendar display and write-back must use `calendarDisplayDateTarget` with no fallback:
 
@@ -111,12 +108,8 @@ Calendar display and write-back must use `calendarDisplayDateTarget` with no fal
 | `startDate`     | Only tasks with `startDate`     | Write or replace `🛫 YYYY-MM-DD` |
 | `dueDate`       | Only tasks with `dueDate`       | Write or replace `📅 YYYY-MM-DD` |
 
-Backlog filter UI entry points must use the same `backlogDateTarget` setting:
-
-- Settings -> Integrations -> Obsidian Tasks Integration.
-- The dropdown in the Tasks Backlog view header.
-
-Changing the setting must save plugin settings and call `providerRegistry.refreshBacklogViews()` so all open backlog views re-query the provider. Backlog filtering belongs in `TasksPluginProvider.getUndatedTasks()` because the provider owns the Tasks cache shape and the date-field mapping. UI components should not duplicate that filtering logic.
+Backlog filtering belongs in `TasksPluginProvider.getUndatedTasks()` because the provider owns the
+Tasks cache shape and date-field mapping. UI components must not duplicate that filtering logic.
 
 Calendar event drag/update behavior and backlog drag/drop both write `calendarDisplayDateTarget`. `TasksPluginProvider._taskToOFCEvent()` must also read only `calendarDisplayDateTarget`; do not reintroduce scheduled/due/start fallback priority. Because event-cache contents are derived from the display field, changing `calendarDisplayDateTarget` may require an Obsidian restart or plugin reload for all open views to fully reflect the new policy.
 

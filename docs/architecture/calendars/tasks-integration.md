@@ -73,7 +73,7 @@ The provider enforces a strict mapping policy to maintain data integrity:
 
 Backlog filtering is split by responsibility:
 
-- **Provider-level filter** (`TasksPluginProvider.getUndatedTasks()`): decides which tasks are backlog candidates using `backlogDateTarget` and completion state.
+- **Provider-level filter** (`TasksPluginProvider.getUndatedTasks()`): includes only incomplete tasks without a scheduled, start, or due date.
 - **Backlog Query Filter** (proposed): applies a Full Calendar-owned query string from `settings.tasksIntegration.backlogQuery` to backlog candidates before they are exposed to the backlog view.
 - **Global Query Filter** (`TasksQueryFilter`): If the setting `includeGlobalQueryInBacklog` is enabled, the provider fetches the global query string defined in Obsidian Tasks (`app.plugins.plugins['obsidian-tasks-plugin']?.settings?.globalQuery`) and filters backlog tasks accordingly.
 - **View-level filter** (`TasksBacklogView`): applies client-side fuzzy filtering over candidate tasks by title and file path.
@@ -94,7 +94,7 @@ interface TasksIntegrationSettings {
 
 Suggested evaluation order in `TasksPluginProvider.getUndatedTasks()`:
 
-1. Select incomplete tasks missing the configured `backlogDateTarget`.
+1. Select incomplete tasks without a scheduled, start, or due date.
 2. If `tasksIntegration.backlogQuery` is non-empty, filter tasks with `new TasksQueryFilter(backlogQuery)`.
 3. If `includeGlobalQueryInBacklog` is enabled, filter the remaining tasks with the Tasks plugin `globalQuery`.
 4. Map the final tasks to `ParsedUndatedTask` for the backlog view.

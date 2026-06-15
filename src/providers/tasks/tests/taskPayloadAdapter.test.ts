@@ -80,6 +80,25 @@ describe('taskPayloadAdapter', () => {
     );
   });
 
+  it('recovers persisted scheduling dates from markdown when cache date fields are absent', () => {
+    const task = {
+      path: 'Daily.md',
+      description: '#task Persisted dates',
+      taskLocation: { lineNumber: 0 },
+      originalMarkdown: '- [ ] #task Persisted dates 🛫 2026-05-01 ⏳ 2026-05-02 📅 2026-05-03'
+    } satisfies TasksPluginTask;
+
+    const calendarTask = taskToCalendarTask(task);
+
+    expect(calendarTask.startDate?.toISOString()).toBe(
+      new Date('2026-05-01T00:00:00').toISOString()
+    );
+    expect(calendarTask.scheduledDate?.toISOString()).toBe(
+      new Date('2026-05-02T00:00:00').toISOString()
+    );
+    expect(calendarTask.dueDate?.toISOString()).toBe(new Date('2026-05-03T00:00:00').toISOString());
+  });
+
   it('deduplicates mirrored Tasks entries when native task id is shared', () => {
     const sourceTask = {
       id: '7f6c8f0d',

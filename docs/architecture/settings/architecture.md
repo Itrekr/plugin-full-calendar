@@ -15,7 +15,7 @@ This page describes how settings are modeled and applied.
 - Settings schema remains the single typed source of truth.
 - Features own their setting UI and behavior handlers.
 - Settings updates propagate to views, cache, and providers.
-- If a setting is exposed in more than one UI location, each control must write the same typed settings field and trigger the same downstream refresh path. For example, the Tasks backlog date-field selector in Settings and in the Tasks Backlog view both write `tasksIntegration.backlogDateTarget` and refresh backlog views through the provider registry.
+- If a setting is exposed in more than one UI location, each control must write the same typed settings field and trigger the same downstream refresh path.
 
 ## Calendar Source Auto-Save
 

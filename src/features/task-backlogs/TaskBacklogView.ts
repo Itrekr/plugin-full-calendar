@@ -9,7 +9,6 @@ import {
   TaskBacklogItem,
   TaskBacklogProvider
 } from '../../providers/Provider';
-import { TasksBacklogDateTarget } from '../../types/settings';
 import { t } from '../i18n/i18n';
 import { createDocsLinksFragment } from '../../ui/settings/docsLinks';
 import './task-backlog.css';
@@ -200,9 +199,6 @@ export class TaskBacklogView extends ItemView {
     const header = contentContainer.createDiv({ cls: 'tasks-backlog-header' });
     const headerTitleRow = header.createDiv({ cls: 'tasks-backlog-title-row' });
     headerTitleRow.createEl('h3', { text: 'Task backlog' });
-    if (providers.some(provider => provider.type === 'tasks')) {
-      this.renderDateTargetSelector(headerTitleRow);
-    }
     this.renderSearchBar(header);
 
     const openTaskCount = this.getOpenTasks().length;
@@ -346,7 +342,7 @@ export class TaskBacklogView extends ItemView {
 
     emptyState.createDiv({ text: 'No unscheduled tasks.' });
     emptyState.createDiv({
-      text: 'Tasks missing their scheduling date will appear here.',
+      text: 'Incomplete tasks without a scheduled, start, or due date will appear here.',
       cls: 'tasks-backlog-help'
     });
   }
@@ -392,50 +388,6 @@ export class TaskBacklogView extends ItemView {
     this.shouldRestoreSearchFocus = false;
     this.searchSelectionStart = null;
     this.searchSelectionEnd = null;
-  }
-
-  private renderDateTargetSelector(container: HTMLElement): void {
-    const wrapper = container.createEl('label', { cls: 'tasks-backlog-target' });
-    wrapper.createSpan({ text: 'Missing date' });
-
-    const select = wrapper.createEl('select', {
-      cls: 'tasks-backlog-target-select',
-      attr: { 'aria-label': t('settings.tasksIntegration.backlogDateTarget.label') }
-    });
-
-    this.addDateTargetOption(
-      select,
-      'scheduledDate',
-      t('settings.tasksIntegration.backlogDateTarget.scheduled')
-    );
-    this.addDateTargetOption(
-      select,
-      'startDate',
-      t('settings.tasksIntegration.backlogDateTarget.start')
-    );
-    this.addDateTargetOption(
-      select,
-      'dueDate',
-      t('settings.tasksIntegration.backlogDateTarget.due')
-    );
-    select.value = PluginState.getSettings().tasksIntegration.backlogDateTarget;
-
-    select.addEventListener('change', () => {
-      PluginState.getSettings().tasksIntegration.backlogDateTarget =
-        select.value as TasksBacklogDateTarget;
-      this.currentPage = 1;
-      void PluginState.saveSettings().then(() => {
-        PluginState.getProviderRegistry().refreshBacklogViews();
-      });
-    });
-  }
-
-  private addDateTargetOption(
-    select: HTMLSelectElement,
-    value: TasksBacklogDateTarget,
-    label: string
-  ): void {
-    select.createEl('option', { text: label, attr: { value } });
   }
 
   private renderTasksList(container: HTMLElement): void {

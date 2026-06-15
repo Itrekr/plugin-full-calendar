@@ -118,12 +118,29 @@ function dateFromTasksValue(value: TasksPluginTaskDate | null | undefined): Date
   return date instanceof Date && !Number.isNaN(date.getTime()) ? date : null;
 }
 
+function dateFromMarkdown(originalMarkdown: string, marker: string): Date | null {
+  const match = originalMarkdown.match(
+    new RegExp(`${marker}\\s*(\\d{4}-\\d{2}-\\d{2})(?=\\s|$)`, 'u')
+  );
+  if (!match) {
+    return null;
+  }
+
+  const date = new Date(`${match[1]}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 function getTaskDate(
   task: TasksPluginTask,
   publicKey: 'startDate' | 'dueDate' | 'scheduledDate' | 'doneDate',
-  privateKey: '_startDate' | '_dueDate' | '_scheduledDate' | '_doneDate'
+  privateKey: '_startDate' | '_dueDate' | '_scheduledDate' | '_doneDate',
+  markdownMarker: string
 ): Date | null {
-  return dateFromTasksValue(task[publicKey]) ?? dateFromTasksValue(task[privateKey]);
+  return (
+    dateFromTasksValue(task[publicKey]) ??
+    dateFromTasksValue(task[privateKey]) ??
+    dateFromMarkdown(task.originalMarkdown, markdownMarker)
+  );
 }
 
 function getTaskDescription(task: TasksPluginTask): string {
@@ -157,14 +174,14 @@ export function getCleanTaskTitle(task: TasksPluginTask): {
 export function taskToCalendarTask(task: TasksPluginTask): CalendarTask {
   const oneBasedLineNumber = task.taskLocation.lineNumber + 1;
   const { title, startTime, endTime } = getCleanTaskTitle(task);
-  const doneDate = getTaskDate(task, 'doneDate', '_doneDate');
+  const doneDate = getTaskDate(task, 'doneDate', '_doneDate', '✅');
 
   return {
     id: `${task.path}::${task.taskLocation.lineNumber}`,
     title,
-    startDate: getTaskDate(task, 'startDate', '_startDate'),
-    dueDate: getTaskDate(task, 'dueDate', '_dueDate'),
-    scheduledDate: getTaskDate(task, 'scheduledDate', '_scheduledDate'),
+    startDate: getTaskDate(task, 'startDate', '_startDate', '🛫'),
+    dueDate: getTaskDate(task, 'dueDate', '_dueDate', '📅'),
+    scheduledDate: getTaskDate(task, 'scheduledDate', '_scheduledDate', '⏳'),
     originalMarkdown: task.originalMarkdown,
     filePath: task.path,
     lineNumber: oneBasedLineNumber,
