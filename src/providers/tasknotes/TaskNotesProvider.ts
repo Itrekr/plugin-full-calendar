@@ -20,6 +20,7 @@ import {
   TaskNotesConfigComponentProps
 } from './TaskNotesConfigComponent';
 import { t } from '../../features/i18n/i18n';
+import { modifyFrontmatterString } from '../fullnote/frontmatter';
 
 export type EditableEventResponse = [OFCEvent, EventLocation | null];
 
@@ -47,6 +48,8 @@ type TaskNotesTaskCreationData = {
 };
 
 const TASK_UPDATE_COALESCE_MS = 80;
+const TASKNOTES_COMPANION_LINK_PROPERTIES = ['due-link', 'deadline-link'] as const;
+const TASKNOTES_COMPANION_DATE_PROPERTIES = ['due', 'deadline'] as const;
 
 type TaskNotesPluginApi = {
   cacheManager: {
@@ -310,6 +313,54 @@ export class TaskNotesProvider
       diff += 24 * 60;
     }
     return Math.round(diff);
+  }
+
+  private taskNotesDailyNoteLink(date: string | null): string | null {
+    return date ? `"[[${date}]]"` : null;
+  }
+
+  private scheduledDateFromValue(value: string): string {
+    return value.split('T')[0] || value;
+  }
+
+  private frontmatterLineContainsDate(contents: string, property: string, date: string): boolean {
+    const escapedProperty = property.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`^${escapedProperty}:.*${date}`, 'm').test(contents);
+  }
+
+  private async updateTaskFileScheduleProperties(
+    task: TaskNotesTask,
+    scheduledValue: string,
+    previousDate?: string
+  ): Promise<void> {
+    const file = this.plugin.app.vault.getFileByPath(task.path);
+    if (!file) return;
+
+    const scheduledDate = this.scheduledDateFromValue(scheduledValue);
+    const contents = await this.plugin.app.vault.read(file);
+    const modifications: Record<string, unknown> = {
+      scheduled: scheduledValue,
+      'scheduled-link': this.taskNotesDailyNoteLink(scheduledDate)
+    };
+
+    if (previousDate) {
+      for (const property of TASKNOTES_COMPANION_LINK_PROPERTIES) {
+        if (this.frontmatterLineContainsDate(contents, property, previousDate)) {
+          modifications[property] = this.taskNotesDailyNoteLink(scheduledDate);
+        }
+      }
+
+      for (const property of TASKNOTES_COMPANION_DATE_PROPERTIES) {
+        if (this.frontmatterLineContainsDate(contents, property, previousDate)) {
+          modifications[property] = scheduledDate;
+        }
+      }
+    }
+
+    const updatedContents = modifyFrontmatterString(contents, modifications);
+    if (updatedContents !== contents) {
+      await this.plugin.app.vault.modify(file, updatedContents);
+    }
   }
 
   private isTaskNotesSourceId(): boolean {
@@ -1142,6 +1193,8 @@ export class TaskNotesProvider
     }
 
     let updatedTask = await taskNotes.taskService.updateProperty(task, 'scheduled', scheduledValue);
+    const previousDate = oldEvent.type === 'single' ? oldEvent.date : undefined;
+    await this.updateTaskFileScheduleProperties(updatedTask, scheduledValue, previousDate);
 
     try {
       updatedTask = await taskNotes.taskService.updateProperty(
